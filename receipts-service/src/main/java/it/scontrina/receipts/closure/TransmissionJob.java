@@ -2,8 +2,7 @@ package it.scontrina.receipts.closure;
 
 import it.scontrina.receipts.config.ReceiptsProperties;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -13,11 +12,10 @@ import java.time.Clock;
  * Job di trasmissione delle chiusure. Può girare su più istanze contemporaneamente:
  * la correttezza NON dipende dal fatto che giri una volta sola, ma dal claim atomico a DB.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class TransmissionJob {
-
-    private static final Logger log = LoggerFactory.getLogger(TransmissionJob.class);
 
     private final DailyClosureRepository closures;
     private final TransmissionClient client;

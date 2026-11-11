@@ -4,8 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.scontrina.receipts.config.KafkaTopics;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -14,11 +13,10 @@ import org.springframework.stereotype.Component;
  * Il consumer group legge dall'inizio del topic (auto-offset-reset: earliest),
  * quindi un'istanza nuova ricostruisce la copia da zero.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class AccountEventsListener {
-
-    private static final Logger log = LoggerFactory.getLogger(AccountEventsListener.class);
 
     private final ObjectMapper objectMapper;
     private final AccessProjection projection;

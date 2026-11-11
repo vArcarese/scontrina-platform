@@ -2,10 +2,9 @@ package it.scontrina.outbox;
 
 import it.scontrina.common.correlation.CorrelationId;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.KafkaException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,11 +24,10 @@ import java.util.concurrent.TimeoutException;
  * Garanzia: at-least-once. Se l'invio riesce ma il commit del "published_at" fallisce,
  * l'evento verrà ripubblicato: per questo i consumer sono idempotenti (scartano gli eventi con version non più recente).
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class OutboxRelay {
-
-    private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
 
     private final OutboxRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;

@@ -2,8 +2,7 @@ package it.scontrina.stub;
 
 import it.scontrina.common.error.BusinessException;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,12 +31,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  *  - idempotenza su transmissionId: un retry di una trasmissione già registrata restituisce
  *    lo stesso externalRef (200) senza duplicarla. Il contatore "received" lo dimostra.
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/transmissions")
 @RequiredArgsConstructor
 public class TransmissionStubController {
-
-    private static final Logger log = LoggerFactory.getLogger(TransmissionStubController.class);
 
     private final StubProperties properties;
     private final Map<String, StoredTransmission> store = new ConcurrentHashMap<>();
