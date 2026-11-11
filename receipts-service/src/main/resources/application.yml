@@ -29,6 +29,9 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+        # send() attende i metadati del broker fino a max.block.ms (default 60 s): senza limite,
+        # con Kafka giù il relay resterebbe bloccato un minuto con la transazione e i lock aperti
+        max.block.ms: 5000
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
