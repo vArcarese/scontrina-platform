@@ -1,0 +1,120 @@
+name: scontrina
+
+services:
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./infra/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mongo:
+    image: mongo:7.0
+    command: ["mongod", "--quiet"]   # niente log di connessione (l'healthcheck ne apre una ogni 5s)
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports:
+      - "29092:29092"   # accesso dall'host (IDE, test manuali)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller        # KRaft: niente ZooKeeper
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"      # i topic li dichiarano i servizi (NewTopic)
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  account-service:
+    build:
+      context: .
+      args:
+        MODULE: account-service
+    ports:
+      - "8081:8081"
+    environment:
+      MYSQL_HOST: mysql
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs   # log JSON
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  receipts-service:
+    build:
+      context: .
+      args:
+        MODULE: receipts-service
+    ports:
+      - "8082:8082"
+    environment:
+      MYSQL_HOST: mysql
+      KAFKA_BOOTSTRAP: kafka:9092
+      TRANSMISSION_BASE_URL: http://transmission-stub:8090
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs   # log JSON
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      transmission-stub:
+        condition: service_started
+
+  transmission-stub:
+    build:
+      context: .
+      args:
+        MODULE: transmission-stub
+    ports:
+      - "8090:8090"
+    environment:
+      STUB_FAILURE_RATE: "0.3"
+      STUB_SLOW_RATE: "0.2"
+      STUB_SLOW_DELAY: 5s
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs   # log JSON
+
+volumes:
+  mysql-data:
+  mongo-data:

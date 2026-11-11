@@ -1,0 +1,26 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: transmission-stub
+  threads:
+    virtual:
+      enabled: true
+
+logging:
+  # Log leggibili in locale (avvio da IntelliJ), con il correlationId nel pattern.
+  # In docker-compose si attivano i log JSON con LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs (configurazione per ambiente).
+  pattern:
+    correlation: "[%X{correlationId:-}] "
+
+stub:
+  failure-rate: ${STUB_FAILURE_RATE:0.3}
+  slow-rate: ${STUB_SLOW_RATE:0.2}
+  slow-delay: ${STUB_SLOW_DELAY:5s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,0 +1,9 @@
+target/
+.idea/
+*.iml
+.vscode/
+*.log
+.DS_Store
+
+# Script PowerShell di sviluppo locale (non consegnati)
+scripts/

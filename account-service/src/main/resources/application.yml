@@ -1,0 +1,47 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: account-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/account_db
+    username: ${MYSQL_USER:account}
+    password: ${MYSQL_PASSWORD:account}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none   # lo schema è solo di Flyway; i test di integrazione su MySQL reale verificano il mapping
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC                     # Instant salvati in UTC su colonne DATETIME(6)
+        type.preferred_instant_jdbc_type: TIMESTAMP
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+
+logging:
+  # Log leggibili in locale (avvio da IntelliJ), con il correlationId nel pattern.
+  # In docker-compose si attivano i log JSON con LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs (configurazione per ambiente).
+  pattern:
+    correlation: "[%X{correlationId:-}] "
+
+outbox:
+  relay:
+    interval-ms: 500
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

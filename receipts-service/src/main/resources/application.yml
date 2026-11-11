@@ -1,0 +1,63 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: receipts-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/receipts_db
+    username: ${MYSQL_USER:receipts}
+    password: ${MYSQL_PASSWORD:receipts}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none   # lo schema è solo di Flyway; i test di integrazione su MySQL reale verificano il mapping
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        type.preferred_instant_jdbc_type: TIMESTAMP
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest   # una nuova istanza ricostruisce la copia locale delle abilitazioni
+
+logging:
+  # Log leggibili in locale (avvio da IntelliJ), con il correlationId nel pattern.
+  # In docker-compose si attivano i log JSON con LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs (configurazione per ambiente).
+  pattern:
+    correlation: "[%X{correlationId:-}] "
+
+receipts:
+  business-zone: Europe/Rome
+  transmission:
+    base-url: ${TRANSMISSION_BASE_URL:http://localhost:8090}
+    connect-timeout: 2000      # ms
+    read-timeout: 3000         # ms: lo stub "lento" risponde oltre -> timeout -> retry
+    max-attempts: 5
+    initial-backoff: 2000      # ms, poi esponenziale
+    max-backoff: 60000         # ms
+    lease: 30000               # ms: deve superare read-timeout con margine
+    poll-interval: 5000        # ms
+
+outbox:
+  relay:
+    interval-ms: 500
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
