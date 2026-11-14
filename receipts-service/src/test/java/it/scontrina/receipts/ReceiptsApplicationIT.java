@@ -12,6 +12,4 @@ class ReceiptsApplicationIT {
     @Test
     void contextLoads() {
     }
-
-    // TODO: test di concorrenza su numerazione e idempotency key, e di controllo delle abilitazioni
 }
