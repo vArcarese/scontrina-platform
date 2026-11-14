@@ -44,20 +44,13 @@ public class ReceiptService {
     public IssueResult issue(String organizationId, String idempotencyKey, IssueReceiptCommand command) {
         Instant now = clock.instant();
         LocalDate businessDate = LocalDate.ofInstant(now, properties.businessZone());
+        IdempotencyRecord.Key key = new IdempotencyRecord.Key(organizationId, idempotencyKey);
 
         //idempotenza
         String requestHash = hash(command);
-        IdempotencyRecord.Key key = new IdempotencyRecord.Key(organizationId, idempotencyKey);
-        Optional<IdempotencyRecord> record = idempotency.findById(key);
-        if (record.isPresent()) {
-            if (Objects.equals(record.get().getRequestHash(), requestHash)) {
-                Receipt existing = receipts.findById(record.get().getReceiptId())
-                        .orElseThrow(() -> new IllegalStateException("Documento dell'idempotency record non trovato"));
-                return new IssueResult(existing, true);
-            } else {
-                throw BusinessException.unprocessable("IDEMPOTENCY_KEY_REUSED",
-                        "La chiave di idempotenza è già stata usata per una richiesta diversa");
-            }
+        Optional<IssueResult> replay = findReplay(key, requestHash);
+        if (replay.isPresent()) {
+            return replay.get();
         }
 
         //abilitazione
@@ -85,24 +78,46 @@ public class ReceiptService {
         return new IssueResult(savedReceipt, false);
     }
 
-    private String hash(IssueReceiptCommand command) {
-        try {
-            byte[] json = mapper.writeValueAsBytes(command);
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(json);
-            return HexFormat.of().formatHex(digest); //64 caratteri come la colonna
-        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
-            throw new IllegalStateException("Impossibile calcolare l'hash della richiesta", e);
-        }
-    }
-
     /**
      * Annullamento: nuovo documento VOID collegato all'originale. Anche questo idempotente.
      */
     @Transactional
     public IssueResult voidReceipt(String organizationId, String receiptId, String registerId,
                                    String idempotencyKey) {
-        // TODO: annullamento idempotente con un nuovo documento VOID
-        throw new UnsupportedOperationException("TODO");
+        Instant now = clock.instant();
+        LocalDate businessDate = LocalDate.ofInstant(now, properties.businessZone());
+        IdempotencyRecord.Key key = new IdempotencyRecord.Key(organizationId, idempotencyKey);
+
+        //idempotenza
+        String requestHash = hash(List.of(receiptId, registerId));
+        Optional<IssueResult> replay = findReplay(key, requestHash);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+
+        Receipt original = receipts.findByIdAndOrganizationId(receiptId, organizationId)
+                .orElseThrow(() -> BusinessException.notFound("Documento", receiptId));
+
+        if (original.getType() != ReceiptType.SALE) {
+            throw BusinessException.unprocessable("RECEIPT_NOT_VOIDABLE", "Documento non annullabile");
+        }
+        boolean existVoid = receipts.existsByVoidedReceiptId(original.getId());
+        if (existVoid) {
+            throw BusinessException.conflict("ALREADY_VOIDED","Il documento " + receiptId + " già annullato");
+        }
+
+        accessChecker.ensureCanIssue(organizationId, businessDate);
+
+        counters.insertIfAbsent(organizationId, registerId);
+        RegisterCounter registerCounter = counters.findForUpdate(new RegisterCounter.Key(organizationId, registerId));
+        long number = registerCounter.next();
+
+        Receipt voidReceipt = Receipt.voidOf(original, registerId, number, businessDate, now);
+        Receipt savedVoid = receipts.saveAndFlush(voidReceipt);
+        idempotency.saveAndFlush(new IdempotencyRecord(key, requestHash, savedVoid.getId(), now));
+        outbox.append(KafkaTopics.DOCUMENTS, organizationId, ReceiptEvent.of(savedVoid));
+
+        return new IssueResult(savedVoid, false);
     }
 
     @Transactional(readOnly = true)
@@ -119,5 +134,30 @@ public class ReceiptService {
 
     /** @param replayed true se il documento esisteva già (richiesta ripetuta con la stessa chiave). */
     public record IssueResult(Receipt receipt, boolean replayed) {
+    }
+
+    private String hash(Object command) {
+        try {
+            byte[] json = mapper.writeValueAsBytes(command);
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(json);
+            return HexFormat.of().formatHex(digest); // 64 caratteri come la colonna
+        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Impossibile calcolare l'hash della richiesta", e);
+        }
+    }
+
+    private Optional<IssueResult> findReplay(IdempotencyRecord.Key key, String requestHash) {
+        Optional<IdempotencyRecord> record = idempotency.findById(key);
+        if (record.isPresent()) {
+            if (Objects.equals(record.get().getRequestHash(), requestHash)) {
+                Receipt existing = receipts.findById(record.get().getReceiptId())
+                        .orElseThrow(() -> new IllegalStateException("Documento dell'idempotency record non trovato"));
+                return Optional.of(new IssueResult(existing, true));
+            } else {
+                throw BusinessException.unprocessable("IDEMPOTENCY_KEY_REUSED",
+                        "La chiave di idempotenza è già stata usata per una richiesta diversa");
+            }
+        }
+        return Optional.empty();
     }
 }
