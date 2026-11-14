@@ -107,5 +107,40 @@ public class DailyClosure {
         return c;
     }
 
-    // TODO: metodi di transizione della macchina a stati
+    public void markTransmitted(String externalRef, Instant now) {
+        requireInProgress();
+        this.status = ClosureStatus.TRANSMITTED;
+        this.externalRef = externalRef;
+        this.transmittedAt = now;
+        this.lastError = null;
+        this.leaseUntil = null;
+        this.updatedAt = now;
+    }
+
+    public void markRetry(String error, Instant nextAttemptAt, Instant now) {
+        requireInProgress();
+        this.status = ClosureStatus.TO_TRANSMIT;
+        this.lastError = truncate(error);
+        this.nextAttemptAt = nextAttemptAt;
+        this.leaseUntil = null;
+        this.updatedAt = now;
+    }
+
+    public void markFailed(String error, Instant now) {
+        requireInProgress();
+        this.status = ClosureStatus.FAILED;
+        this.lastError = truncate(error);
+        this.leaseUntil = null;
+        this.updatedAt = now;
+    }
+
+    private void requireInProgress() {
+        if (status != ClosureStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Transizione non ammessa da " + status);
+        }
+    }
+
+    private static String truncate(String s) {
+        return s == null || s.length() <= 1000 ? s : s.substring(0, 1000);
+    }
 }

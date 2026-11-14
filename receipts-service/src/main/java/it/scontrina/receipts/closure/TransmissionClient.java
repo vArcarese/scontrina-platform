@@ -6,6 +6,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.math.BigDecimal;
@@ -56,6 +57,11 @@ public class TransmissionClient {
                 return new TransmissionOutcome.TransientFailure(detail);
             }
             return new TransmissionOutcome.PermanentFailure(detail);
+        } catch (RestClientException e) {
+            // es. read timeout scattato mentre RestClient legge gli header della risposta: arriva come
+            // RestClientException generica (non ResourceAccessException). L'ente può aver registrato: si riprova
+            // con lo stesso transmissionId.
+            return new TransmissionOutcome.TransientFailure("Errore di comunicazione: " + e.getMessage());
         }
     }
 
