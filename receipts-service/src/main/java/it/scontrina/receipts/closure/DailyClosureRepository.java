@@ -1,7 +1,9 @@
 package it.scontrina.receipts.closure;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +19,14 @@ public interface DailyClosureRepository extends JpaRepository<DailyClosure, Long
             String organizationId, String registerId, LocalDate businessDate);
 
     List<DailyClosure> findByOrganizationIdOrderByBusinessDateDesc(String organizationId);
+
+    /**
+     * Lettura con lock di riga (SELECT ... FOR UPDATE) per registrare l'esito della trasmissione:
+     * tra il controllo del lease e il commit nessun'altra istanza può fare il claim della stessa chiusura.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from DailyClosure c where c.id = :id")
+    Optional<DailyClosure> findByIdForUpdate(@Param("id") Long id);
 
     @Query("""
         select c.id from DailyClosure c

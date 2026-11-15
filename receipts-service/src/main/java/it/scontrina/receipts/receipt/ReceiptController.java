@@ -1,5 +1,6 @@
 package it.scontrina.receipts.receipt;
 
+import it.scontrina.common.error.BusinessException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -30,13 +31,17 @@ public class ReceiptController {
 
     public static final String IDEMPOTENCY_HEADER = "Idempotency-Key";
 
+    /** Lunghezza della colonna idempotency_record.idempotency_key. */
+    private static final int MAX_KEY_LENGTH = 64;
+
     private final ReceiptService service;
 
     /** 201 alla prima emissione, 200 se la richiesta è una ripetizione (stessa Idempotency-Key). */
     @PostMapping
     public ResponseEntity<ReceiptResponse> issue(@PathVariable String organizationId,
-                                                 @RequestHeader(IDEMPOTENCY_HEADER) @Size(max = 64) String idempotencyKey,
+                                                 @RequestHeader(IDEMPOTENCY_HEADER) String idempotencyKey,
                                                  @Valid @RequestBody IssueReceiptRequest request) {
+        requireValidKey(idempotencyKey);
         var result = service.issue(organizationId, idempotencyKey, request.toCommand());
         return ResponseEntity.status(result.replayed() ? HttpStatus.OK : HttpStatus.CREATED)
                 .body(ReceiptResponse.from(result.receipt()));
@@ -50,20 +55,35 @@ public class ReceiptController {
     @PostMapping("/{receiptId}/void")
     public ResponseEntity<ReceiptResponse> voidReceipt(@PathVariable String organizationId,
                                                        @PathVariable String receiptId,
-                                                       @RequestHeader(IDEMPOTENCY_HEADER) @Size(max = 64) String idempotencyKey,
+                                                       @RequestHeader(IDEMPOTENCY_HEADER) String idempotencyKey,
                                                        @Valid @RequestBody VoidReceiptRequest request) {
+        requireValidKey(idempotencyKey);
         var result = service.voidReceipt(organizationId, receiptId, request.registerId(), idempotencyKey);
         return ResponseEntity.status(result.replayed() ? HttpStatus.OK : HttpStatus.CREATED)
                 .body(ReceiptResponse.from(result.receipt()));
     }
 
+    /**
+     * Controllo fatto a mano e non con @Size sul parametro: un vincolo messo direttamente su un parametro
+     * del metodo attiva la "method validation" di Spring, e a quel punto anche gli errori del body
+     * uscirebbero in un formato diverso (senza l'elenco dei campi) da quello degli altri controller.
+     */
+    private static void requireValidKey(String idempotencyKey) {
+        if (idempotencyKey.isBlank() || idempotencyKey.length() > MAX_KEY_LENGTH) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                    IDEMPOTENCY_HEADER + " deve avere da 1 a " + MAX_KEY_LENGTH + " caratteri");
+        }
+    }
+
     // ---------- DTO ----------
 
+    // i @Size corrispondono alla lunghezza delle colonne: un valore troppo lungo è un 400, non un errore del database
+
     public record IssueReceiptRequest(
-            @NotBlank String registerId,
+            @NotBlank @Size(max = 50) String registerId,
             @NotEmpty @Valid List<LineRequest> lines,
             @NotNull PaymentType paymentType,
-            String customerId) {
+            @Size(max = 64) String customerId) {
 
         ReceiptService.IssueReceiptCommand toCommand() {
             return new ReceiptService.IssueReceiptCommand(registerId,
@@ -74,13 +94,13 @@ public class ReceiptController {
     }
 
     public record LineRequest(
-            @NotBlank String description,
+            @NotBlank @Size(max = 255) String description,
             @NotNull @DecimalMin(value = "0", inclusive = false) @Digits(integer = 9, fraction = 3) BigDecimal quantity,
             @NotNull @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal unitPrice,
             @NotNull VatRate vatRate) {
     }
 
-    public record VoidReceiptRequest(@NotBlank String registerId) {
+    public record VoidReceiptRequest(@NotBlank @Size(max = 50) String registerId) {
     }
 
     public record ReceiptResponse(String id, String organizationId, String registerId, long number,

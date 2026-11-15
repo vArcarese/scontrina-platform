@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,7 +52,7 @@ public class OrganizationController {
 
     public record RegisterOrganizationRequest(
             @NotBlank @Pattern(regexp = "\\d{11}", message = "deve essere di 11 cifre") String vatNumber,
-            @NotBlank String legalName) {
+            @NotBlank @Size(max = 255) String legalName) {
     }
 
     public record ChangeStatusRequest(@NotNull OrganizationStatus status) {

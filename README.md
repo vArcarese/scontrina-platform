@@ -218,7 +218,10 @@ Gli eventi possono arrivare duplicati (consegna at-least-once) o fuori ordine. O
 dell'entità in Account; la copia locale applica un evento solo se `version > sourceVersion`, altrimenti lo ignora.
 Questo rende la proiezione idempotente senza una tabella di eventi già processati: è possibile rileggere i topic
 dall'inizio senza alterare i dati. I topic di Account sono **compattati** (chiave `organizationId`, e
-`organizationId:product` per le abilitazioni): una nuova istanza può ricostruire la copia locale rileggendoli.
+`organizationId:product` per le abilitazioni): conservano almeno l'ultimo stato di ogni entità, quindi un nuovo
+consumer group (un altro servizio, o Receipts dopo un reset degli offset) può ricostruire la copia locale
+rileggendoli dall'inizio. Una nuova istanza dello stesso consumer group invece non rilegge nulla: riparte dagli
+offset già salvati e usa la copia locale che è già nel database.
 
 ### Regola di arrotondamento
 
@@ -256,14 +259,14 @@ il client può basare la sua logica), `correlationId` e `timestamp`:
 
 | HTTP | `code` | Quando |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | campi mancanti o non validi (Bean Validation) |
+| 400 | `VALIDATION_ERROR` | campi mancanti, non validi o troppo lunghi (Bean Validation); `Idempotency-Key` vuota o oltre 64 caratteri |
 | 403 | `ORGANIZATION_UNKNOWN`, `ORGANIZATION_SUSPENDED`, `PRODUCT_NOT_ENABLED`, `ENTITLEMENT_NOT_ACTIVE` | l'organizzazione non può emettere |
 | 404 | `NOT_FOUND` | risorsa inesistente o di un'altra organizzazione |
 | 409 | `ORGANIZATION_ALREADY_EXISTS` | partita IVA già registrata |
 | 409 | `ALREADY_VOIDED` | documento già annullato |
 | 409 | `DUPLICATE_RESOURCE`, `CONCURRENT_MODIFICATION` | conflitto tra richieste concorrenti (vincolo `UNIQUE` o lock ottimistico): la richiesta può essere ripetuta |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | stessa chiave di idempotenza con una richiesta diversa |
-| 422 | `MISSING_VALID_FROM`, `INVALID_VALIDITY_PERIOD`, `RECEIPT_NOT_VOIDABLE` | richiesta non valida per le regole di dominio |
+| 422 | `INVALID_VALIDITY_PERIOD`, `RECEIPT_NOT_VOIDABLE` | richiesta non valida per le regole di dominio |
 
 ### Log e tracciabilità
 
@@ -359,8 +362,9 @@ L'effetto complessivo è quello di una consegna *exactly-once*.
 
 **Istanza che muore durante l'invio:** la chiusura resta `IN_PROGRESS` fino alla scadenza del **lease** (30 s,
 molto più del timeout di 3 s), poi torna prendibile da un'altra istanza. Prima di registrare l'esito, il job
-verifica che il lease sia ancora il suo: se nel frattempo un'altra istanza ha ripreso la chiusura, l'esito viene
-ignorato.
+rilegge la chiusura con un lock di riga (`SELECT … FOR UPDATE`) e verifica che il lease sia ancora il suo: se nel
+frattempo un'altra istanza ha ripreso la chiusura, l'esito viene ignorato. Il lock rende atomici controllo e
+aggiornamento: un claim concorrente aspetta il commit e poi non trova più la chiusura prendibile.
 
 Verifica: `ClosureClaimConcurrencyIT`, 10 claim concorrenti sulla stessa chiusura → uno solo riesce. Verificato
 anche con lo stub: una chiusura in timeout e poi riprovata risulta "già presente (duplicato)" lato ente, con lo
@@ -383,6 +387,11 @@ Soluzione: **transactional outbox** (`platform-outbox`).
   eventi partono, in ordine, quando torna disponibile.
 - Garanzia *at-least-once*: se il processo muore tra la conferma del broker e il commit, l'evento viene ripubblicato.
   Per questo i consumer sono idempotenti (version nella copia locale delle abilitazioni).
+- **L'ordine per chiave è garantito con un solo relay attivo.** Con più istanze, `SKIP LOCKED` fa prendere a
+  ognuna un blocco diverso e i blocchi vengono pubblicati in parallelo: due eventi della stessa chiave possono
+  arrivare su Kafka invertiti. La copia locale delle abilitazioni non ne risente, perché applica un evento solo
+  se la sua `version` è più recente; un consumer di `receipts.documents` (il CRM) dovrebbe gestire il fuori
+  ordine allo stesso modo, come richiede comunque la prova.
 
 ---
 
@@ -394,6 +403,9 @@ Soluzione: **transactional outbox** (`platform-outbox`).
   relazioni con altri dati né transazioni su più tabelle. Un documento per cliente rappresenta questo dato in
   modo naturale.
 - **MongoDB** di conseguenza è avviato da docker compose ma non usato.
+- **La chiusura trasmette un riepilogo, non i singoli documenti**: numero di documenti, primo e ultimo numero,
+  totale della giornata. Con un ente reale si invierebbe il dettaglio dei documenti; il meccanismo di
+  trasmissione (stati, retry, claim, `transmissionId`) resterebbe lo stesso.
 - Un'unica istanza MySQL con due database e due utenti separati (in produzione: istanze distinte).
 - Nessuna autenticazione/autorizzazione: l'organizzazione è nel path.
 - Un documento emesso dopo la chiusura della sua giornata non viene incluso in quella chiusura: non è gestito.
@@ -409,7 +421,8 @@ Soluzione: **transactional outbox** (`platform-outbox`).
   porta lo stato completo). Rimedio: un Dead Letter Topic, vedi sotto.
 - **Scala dei decimali nelle risposte**: alla prima emissione quantità e prezzi tornano come inviati (`1.2`), in una
   ripetizione idempotente come salvati (`1.20`). I valori sono identici, la rappresentazione no. Per lo stesso
-  motivo l'hash di idempotenza distingue `1.0` da `1.00`.
+  motivo l'hash di idempotenza distingue `1.0` da `1.00`. Vale anche per `issuedAt`: nanosecondi alla prima
+  emissione, microsecondi (la precisione della colonna) in una ripetizione.
 
 ## Cosa farei con più tempo
 
@@ -455,3 +468,8 @@ Strumento usato: **Claude, tramite Claude Code**, come assistente durante tutto 
 
 Ho usato Claude anche per discutere le scelte progettuali (documentate sopra) e per verificare i comportamenti
 in caso di concorrenza e di guasto.
+
+**Revisione finale prima della consegna**, fatta con Claude e con **ChatGPT**. Ne sono uscite tre correzioni,
+scritte da Claude e verificate da me: il lock di riga nella registrazione dell'esito della trasmissione
+(`TransmissionJob`, `DailyClosureRepository`), il formato degli errori di validazione sull'emissione e i limiti di
+lunghezza sui campi in ingresso (`ReceiptController`, `OrganizationController`).

@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consuma gli eventi di Account e aggiorna la copia locale.
- * Il consumer group legge dall'inizio del topic (auto-offset-reset: earliest),
- * quindi un'istanza nuova ricostruisce la copia da zero.
+ * Un consumer group senza offset salvati legge dall'inizio del topic (auto-offset-reset: earliest)
+ * e ricostruisce la copia da zero; un'istanza in più dello stesso group riparte invece dagli offset salvati.
  */
 @Slf4j
 @Component

@@ -88,7 +88,9 @@ public class TransmissionJob {
     }
 
     private void applyOutcome(Long id, Instant leaseUntil, TransmissionOutcome outcome) {
-        DailyClosure closure = closures.findById(id).orElseThrow();
+        // lettura con lock di riga: il controllo del lease e l'aggiornamento sono atomici rispetto al claim
+        // di un'altra istanza (il suo UPDATE aspetta il mio commit, poi trova la condizione non più vera).
+        DailyClosure closure = closures.findByIdForUpdate(id).orElseThrow();
 
         // se il mio lease è scaduto, un'altra istanza può aver ripreso la chiusura: non sovrascrivo il suo stato.
         // Lo stesso transmissionId garantisce comunque che l'ente non registri due volte.
